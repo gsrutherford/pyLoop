@@ -1,9 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import gammainc
-from Spline_IDL import spline
 import scipy.interpolate as interpolate
-from getGfileDict import getGfileDict
 from omfit_classes import utils_fusion
 from omfit_classes import omfit_eqdsk
 from omfit_classes import omfit_efit
@@ -15,8 +12,7 @@ import MDSplus as MDS
 
 class pyLoop:
 
-    def __init__(self,shot, efitID = 'EFIT02', nrho=101, useZipfits = True,
-            t1 = None, dt_step = 50, numTimeSlices = 1, dt_avg = 50):
+    def __init__(self,shot, timeSlices, efitID = 'EFIT02', nrho=101, useZipfits = True,dt_avg = 50):
 
         self.shot = shot
         self.efitID = efitID
@@ -27,11 +23,9 @@ class pyLoop:
         if useZipfits:
             self.collectZipfits()
 
-        self.t1 = t1
-        self.dt_step = dt_step
-        self.numTimeSlices = numTimeSlices
         self.dt_avg = dt_avg
-        self.timeSlices = self.t1 + self.dt_step*np.arange(0,self.numTimeSlices,1)
+        self.timeSlices = np.array(timeSlices)
+        numTimeSlices = len(self.timeSlices)
     
         self.f = np.zeros((numTimeSlices,nrho))
         self.eps = np.zeros((numTimeSlices,nrho))
@@ -59,6 +53,7 @@ class pyLoop:
         self.E_para = np.zeros((numTimeSlices,nrho))
         self.J_ohm = np.zeros((numTimeSlices,nrho))
         self.J_BS = np.zeros((numTimeSlices,nrho))
+        self.currentSign = np.zeros(numTimeSlices)  
 
         
     def collectZipfits(self):
@@ -117,6 +112,7 @@ class pyLoop:
 
         ###First get the quantities that don't need multiple gfiles
         #We're not going to average them since there is a gfile at our chosen time
+        self.currentSign[timeIndex] = np.sign(gfileAtTime['CURRENT'])
         gfile_rho_n = gfileAtTime['RHOVN']
         gfile_psi_n = gfileAtTime['fluxSurfaces']['levels']
         f = gfileAtTime['FPOL']
@@ -125,7 +121,7 @@ class pyLoop:
         avgR = gfileAtTime['fluxSurfaces']['avg']['R']
         avgB2 = gfileAtTime['fluxSurfaces']['avg']['Btot**2']
         avgBphi2 = gfileAtTime['fluxSurfaces']['avg']['Bt**2']
-        avgJpara = gfileAtTime.surfAvg('Jpar')
+        avgJpara = gfileAtTime.surfAvg('Jpar')*self.currentSign[timeIndex]
         q = gfileAtTime['fluxSurfaces']['avg']['q']
         ft = utils_fusion.f_t(r_minor = avgr, R_major = avgR)
         grad_term = gfileAtTime['fluxSurfaces']['avg']['grad_term']
@@ -150,12 +146,15 @@ class pyLoop:
         self.psi_n[timeIndex,:] = interp1d(gfile_rho_n, gfile_psi_n)(self.rho_n)
         self.rho_bndry[timeIndex] = gfileAtTime['fluxSurfaces']['geo']['rho'][-1]
         self.B_0[timeIndex] = gfileAtTime['BCENTR']
+        
 
         #now onto the quantities that require all of the gfiles in the time window
         psis_at_psiN = np.zeros((len(gfilesInTimeWindow), len(gfile_psi_n)))
         rho_bndrys = np.zeros(len(gfilesInTimeWindow))
         B_0s = np.zeros(len(gfilesInTimeWindow))
         gfileTimes = list(gfilesInTimeWindow.keys())
+
+        fig,ax = plt.subplots()
         for j in range(len(gfilesInTimeWindow)):
             
             gfile = gfilesInTimeWindow[gfileTimes[j]]
@@ -164,6 +163,10 @@ class pyLoop:
             #psis[j,:] = interp1d(gfile_rho_n, psi)(self.rho_n)
             rho_bndrys[j] = gfile['fluxSurfaces']['geo']['rho'][-1]
             B_0s[j] = gfile['BCENTR']
+            
+            ax.plot(psis_at_psiN[j,:], label = gfileTimes[j])
+        ax.legend()
+        plt.show()
 
         gfileIndex = np.argmin(np.abs(gfileTimes - self.timeSlices[timeIndex]))
         drho_bndry_dt = np.gradient(rho_bndrys, gfileTimes)*1e3 #convert from 1/ms to 1/s
@@ -326,17 +329,20 @@ class pyLoop:
         Ti_err*=1e3
 
         nD = ne*Zeff-Z_impurity**2*nC
+        nD[nD <= 10] = 10
         pressure = (ne*Te + nD*Ti + nC*Ti)*1.602e-19
-        """
+        #"""
         fig,ax = plt.subplots()
         ax.plot(self.rho_n, Te)
         ax.plot(self.rho_n, Ti)
         ax2 =ax.twinx()
         ax2.plot(self.rho_n, ne, linestyle = 'dashed')
         ax2.plot(self.rho_n, nC, linestyle = 'dashed')
+        ax2.plot(self.rho_n, nD, linestyle = 'dashed')
         plt.show()
-        """
-        J_BS_prof = utils_fusion.sauter_bootstrap(gEQDSKs = gfile, psi_N = self.psi_n[timeIndex], 
+        #car = los
+        #"""
+        J_BS_prof = self.currentSign*utils_fusion.sauter_bootstrap(gEQDSKs = gfile, psi_N = self.psi_n[timeIndex], 
                 Ti = np.array([Ti]), ne = np.array([ne]), Te = np.array([Te]),
                 charge_number_to_use_in_ion_collisionality = 'Koh', 
                 charge_number_to_use_in_ion_lnLambda = 'Koh',
@@ -377,12 +383,19 @@ class pyLoop:
 
         for timeIndex in range(len(self.timeSlices)):
             time = self.timeSlices[timeIndex]
-            mask = np.where((gtimes >= time - self.dt_avg/2)*(gtimes <= time + self.dt_avg/2))
+            mask = np.where((gtimes >= time - self.dt_avg/2)*
+                            (gtimes <= time + self.dt_avg/2))
             relevantGfileTimes = gtimes[mask]
 
             if time not in relevantGfileTimes:
                 print('***')
                 print('Requested gfile time is not in tree, skipping it')
+                print('***')
+                continue
+            print(f'num gfiles in window: {len(relevantGfileTimes)}')
+            if len(relevantGfileTimes) < 3:
+                print('***')
+                print('Need at least 3 eqdsks in timewindow')
                 print('***')
                 continue
 
@@ -407,17 +420,17 @@ class pyLoop:
                         self.avgBphi2[timeIndex]/(2*np.pi*self.B_0[timeIndex]*self.f[timeIndex]))
 
             self.J_ohm[timeIndex,:] = self.E_para[timeIndex,:]*sigma_neo
-
+            #"""
             fig,axes = plt.subplots(nrows = 2, ncols = 2)
             axes[0,0].plot(self.rho_n, np.abs(self.q[timeIndex,:]), lw = 2, label = r'$q$')
             axes[0,0].set_ylabel('q')
             axes[0,0].set_xlabel(r'$\hat{\rho}$')
             axes[0,0].set_ylim([1,7])
 
-            axes[0,1].plot(self.rho_n, np.abs(self.avgJpara[timeIndex,:])/1e6, lw = 2, label = r'$J_{||}$')
+            axes[0,1].plot(self.rho_n, self.avgJpara[timeIndex,:]/1e6, lw = 2, label = r'$J_{||}$')
             axes[0,1].set_ylabel(r'<$J_{||}$> (MA/m^2)')
             axes[0,1].set_xlabel(r'$\hat{\rho}$')
-            axes[0,1].set_ylim([.2,1.2])
+            #axes[0,1].set_ylim([.2,1.2])
 
             #axes[0,2].plot(self.rho_n, self.dpsi_dt[timeIndex,:], lw = 2, label = r'$dpsi_dt$')
             #axes[0,2].set_ylabel(r'$\dot{\psi}$')
@@ -444,23 +457,22 @@ class pyLoop:
             figJ, axesJ = plt.subplots(nrows = 2)
             axesJ[0].plot(self.rho_n, self.J_ohm[timeIndex,:]/1e6, lw = 2, label = r'$J_{ohm}$')
             axesJ[0].plot(self.rho_n, self.J_BS[timeIndex,:]/1e6, lw = 2, label = r'$J_{BS}$')
-            axesJ[0].plot(self.rho_n, np.abs(self.avgJpara[timeIndex,:])/1e6, lw = 2, label = r'$J_{||}$')
-            J_NI =  np.abs(self.avgJpara[timeIndex,:])-self.J_BS[timeIndex,:]-self.J_ohm[timeIndex,:]           
+            axesJ[0].plot(self.rho_n, self.avgJpara[timeIndex,:]/1e6, lw = 2, label = r'$J_{||}$')
+            J_NI = self.avgJpara[timeIndex,:]-self.J_BS[timeIndex,:]-self.J_ohm[timeIndex,:]           
             axesJ[1].plot(self.rho_n, J_NI/1e6, lw = 2, label = r'$J_{NI}$')
             axesJ[1].axhline(0,lw = 2, color = 'k', linestyle = 'dashed')
             axesJ[0].set_xlabel(r'$\hat{\rho}$')
             axesJ[1].set_xlabel(r'$\hat{\rho}$')
             axesJ[1].set_ylabel(r'$J_{NI}$ (MA/m^2)')
             axesJ[0].set_ylabel(r'$J$ (MA/m^2)')
-            axesJ[0].set_ylim([-.5,1.5])
-            axesJ[1].set_ylim([-.5,1.5])
+            #axesJ[0].set_ylim([-.5,1.5])
+            #axesJ[1].set_ylim([-.5,1.5])
             axesJ[0].legend()
             #"""
-            fig.tight_layout()
+            figJ.tight_layout()
             plt.show()
             #"""
  #use 03 for compare since it's broken           
-loop = pyLoop(shot = 147634, t1 = 4555, dt_step = 100, numTimeSlices = 1, 
-    dt_avg = 100, efitID = 'EFIT02')
+loop = pyLoop(202162, [1800.0], dt_avg = 100, efitID = 'EFIT02er')
 loop.nvloop()
 
