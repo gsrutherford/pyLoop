@@ -8,19 +8,20 @@ import omfit_classes
 from scipy.interpolate import interp1d
 import gadata
 import MDSplus as MDS
-
+import os
+import netCDF4
 
 class pyLoop:
 
-    def __init__(self,shot, timeSlices, efitID = 'EFIT02', nrho=101, useZipfits = True,dt_avg = 50):
+    def __init__(self,shot, timeSlices, efitID = 'EFIT02', nrho=101, useKinetic = True,dt_avg = 50):
 
         self.shot = shot
         self.efitID = efitID
         self.nrho = nrho
         self.rho_n = np.linspace(0,1,nrho)
-        self.useZipfits = useZipfits
+        self.useKinetic = useKinetic
 
-        if useZipfits:
+        if not useKinetic:
             self.collectZipfits()
 
         self.dt_avg = dt_avg
@@ -42,6 +43,7 @@ class pyLoop:
         self.hcap = np.zeros((numTimeSlices,nrho))
         self.gfileTime = np.zeros(numTimeSlices)
         self.psi_n = np.zeros((numTimeSlices,nrho))
+        self.psi = np.zeros((numTimeSlices,nrho))
         self.rho_bndry = np.zeros(numTimeSlices)
         self.B_0 = np.zeros(numTimeSlices)
         
@@ -54,6 +56,35 @@ class pyLoop:
         self.J_ohm = np.zeros((numTimeSlices,nrho))
         self.J_BS = np.zeros((numTimeSlices,nrho))
         self.currentSign = np.zeros(numTimeSlices)  
+
+    #Temperature in units of keV
+    #density in units of 1/m^3
+    def collectKineticProfs(self, timeIndex):
+        time = int(self.timeSlices[timeIndex])
+        profile_nc = netCDF4.Dataset(f'/home/rutherfordg/nvloop/{self.shot}.0{time}_kinetic_profs.nc')
+        self.Te_fit_rho_n = profile_nc.variables['rho'][:]
+        self.Ti_fit_rho_n = profile_nc.variables['rho'][:]
+        self.nC_fit_rho_n = profile_nc.variables['rho'][:]
+        self.ne_fit_rho_n = profile_nc.variables['rho'][:]
+
+        self.Ti_fit_times = profile_nc.variables['time'][:]
+        self.Te_fit_times = profile_nc.variables['time'][:]
+        self.nC_fit_times = profile_nc.variables['time'][:]
+        self.ne_fit_times = profile_nc.variables['time'][:]
+
+        #zipfits come out as (rho, time)
+        #kinetic from quickfit come as (time, rho)
+        #this is to match zipfits
+        self.Te_fits = (profile_nc.variables['T_e'][:]/1e3).T
+        self.Ti_fits = (profile_nc.variables['T_12C6'][:]/1e3).T
+        self.ne_fits = profile_nc.variables['n_e'][:].T
+        self.nC_fits = profile_nc.variables['n_12C6'][:].T
+
+        self.Te_fit_err = np.zeros(self.Te_fits.shape)
+        self.ne_fit_err = np.zeros(self.ne_fits.shape)
+        self.Ti_fit_err = np.zeros(self.Ti_fits.shape)
+        self.nC_fit_err = np.zeros(self.nC_fits.shape)
+
 
         
     def collectZipfits(self):
@@ -82,14 +113,55 @@ class pyLoop:
         self.ne_fits = ne_fitData.zdata*1e19
         #if the value is less than 10 m^-3, set it to 10 m^-3
         self.ne_fits[self.ne_fits < 10] = 10
-
-        nC_fitData = gadata.gadata('PROFILES.ZDENSFIT', self.shot, tree = 'zipfit01')
-        self.nC_fit_times = nC_fitData.ydata
-        self.nC_fit_rho_n = nC_fitData.xdata
-        self.nC_fit_err = nC_fitData.zerr.T*1e19
-        self.nC_fits = nC_fitData.zdata*1e19
-        self.nC_fits[self.nC_fits < 10] = 10
+        
+        try:
+            nC_fitData = gadata.gadata('PROFILES.ZDENSFIT', self.shot, tree = 'zipfit01')
+            self.nC_fit_times = nC_fitData.ydata
+            self.nC_fit_rho_n = nC_fitData.xdata
+            self.nC_fit_err = nC_fitData.zerr.T*1e19
+            self.nC_fits = nC_fitData.zdata*1e19
+            self.nC_fits[self.nC_fits < 10] = 10
+        except:
+            print(f'Something wrong with carbon data, taking Zeff = 1')
+            nC_fitData = gadata.gadata('PROFILES.EDENSFIT', self.shot, tree = 'zipfit01')
+            self.nC_fit_times = ne_fitData.ydata
+            self.nC_fit_rho_n = ne_fitData.xdata
+            self.nC_fit_err = ne_fitData.zerr.T*1e19
+            self.nC_fits = ne_fitData.zdata*1e19
+            #if the value is less than 10 m^-3, set it to 10 m^-3
+            self.nC_fits[self.nC_fits < 10] = 10
         assert (self.nC_fit_rho_n == self.ne_fit_rho_n).all()
+
+    #generates a linear fit of the input x and y data
+    #evaluates said fit at x0 and returns the result and fit parameter uncertainties
+    def getLinearFit(self,x, y, y_err=None):
+        # Data dimension
+        ndata = len(x)
+
+        # If there's only one point, return default values
+        if ndata == 1:
+            return {'y0': y[0], 'sigy0': 0.0, 'dydx': 0.0, 'sigdydx': 0.0}
+
+        # Set up weights
+        do_err = False
+        if y_err is not None and np.max(np.abs(y_err)) > 0:
+            do_err = True
+        else:
+            y_err = np.ones(ndata)  # Default to equal weights if no errors provided
+
+        # Weighted sums
+        wgt = 1 / y_err**2
+        sumwt = np.sum(wgt)
+        sumx = np.sum(x * wgt)
+        sumy = np.sum(y * wgt)
+        xctr = sumx / sumwt
+        tt = x - xctr
+        sumtt = np.sum(tt**2 * wgt)
+
+        # Coefficients for the linear fit (slope and intercept)
+        dydx = np.sum(tt * y * wgt) / sumtt
+        aa = (sumy - dydx * sumx) / sumwt
+        return aa, dydx
 
     #inputs:
     #   gfile = OMFITgeqdsk object
@@ -115,6 +187,7 @@ class pyLoop:
         self.currentSign[timeIndex] = np.sign(gfileAtTime['CURRENT'])
         gfile_rho_n = gfileAtTime['RHOVN']
         gfile_psi_n = gfileAtTime['fluxSurfaces']['levels']
+        gfile_psi = gfileAtTime['fluxSurfaces']['geo']['psi']
         f = gfileAtTime['FPOL']
         eps = gfileAtTime['fluxSurfaces']['geo']['eps']
         avgr = gfileAtTime['fluxSurfaces']['avg']['a']
@@ -129,53 +202,73 @@ class pyLoop:
         gcap    = gfileAtTime['fluxSurfaces']['avg']['gcap']
         hcap    = gfileAtTime['fluxSurfaces']['avg']['hcap']
 
-        self.f[timeIndex,:] = interp1d(gfile_rho_n, f)(self.rho_n)
-        self.eps[timeIndex,:] = interp1d(gfile_rho_n, eps)(self.rho_n)
-        self.avgr[timeIndex,:] = interp1d(gfile_rho_n, avgr)(self.rho_n)
-        self.avgR[timeIndex,:]  = interp1d(gfile_rho_n, avgR)(self.rho_n)
-        self.avgB2[timeIndex,:] = interp1d(gfile_rho_n, avgB2)(self.rho_n)
-        self.avgJpara[timeIndex,:] = interp1d(gfile_rho_n, avgJpara)(self.rho_n)
-        self.avgBphi2[timeIndex,:] = interp1d(gfile_rho_n, avgBphi2)(self.rho_n)
-        self.q[timeIndex,:] = interp1d(gfile_rho_n, q)(self.rho_n)
-        self.ft[timeIndex,:] = interp1d(gfile_rho_n, ft)(self.rho_n)
+        self.f[timeIndex,:] = interp1d(gfile_rho_n, f, kind = 'cubic')(self.rho_n)
+        self.eps[timeIndex,:] = interp1d(gfile_rho_n, eps, kind = 'cubic')(self.rho_n)
+        self.avgr[timeIndex,:] = interp1d(gfile_rho_n, avgr, kind = 'cubic')(self.rho_n)
+        self.avgR[timeIndex,:]  = interp1d(gfile_rho_n, avgR, kind = 'cubic')(self.rho_n)
+        self.avgB2[timeIndex,:] = interp1d(gfile_rho_n, avgB2, kind = 'cubic')(self.rho_n)
+        self.avgJpara[timeIndex,:] = interp1d(gfile_rho_n, avgJpara, kind = 'cubic')(self.rho_n)
+        self.avgBphi2[timeIndex,:] = interp1d(gfile_rho_n, avgBphi2, kind = 'cubic')(self.rho_n)
+        self.q[timeIndex,:] = interp1d(gfile_rho_n, q, kind = 'cubic')(self.rho_n)
+        self.ft[timeIndex,:] = interp1d(gfile_rho_n, ft, kind = 'cubic')(self.rho_n)
         #self.grad_term[timeIndex,:] = interp1d(gfile_rho_n, grad_term)(self.rho_n)
         #self.fcap[timeIndex,:] = interp1d(gfile_rho_n, fcap)(self.rho_n)
         #self.gcap[timeIndex,:] = interp1d(gfile_rho_n, gcap)(self.rho_n)
         #self.hcap[timeIndex,:] = interp1d(gfile_rho_n, hcap)(self.rho_n)
         self.gfileTime[timeIndex] = gfileAtTime.case_info()['time']
-        self.psi_n[timeIndex,:] = interp1d(gfile_rho_n, gfile_psi_n)(self.rho_n)
+        self.psi_n[timeIndex,:] = interp1d(gfile_rho_n, gfile_psi_n, kind = 'cubic')(self.rho_n)
+        self.psi[timeIndex,:] = interp1d(gfile_rho_n, gfile_psi, kind = 'cubic')(self.rho_n)
         self.rho_bndry[timeIndex] = gfileAtTime['fluxSurfaces']['geo']['rho'][-1]
         self.B_0[timeIndex] = gfileAtTime['BCENTR']
         
 
         #now onto the quantities that require all of the gfiles in the time window
         psis_at_psiN = np.zeros((len(gfilesInTimeWindow), len(gfile_psi_n)))
+        psis_at_rhoN = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
         rho_bndrys = np.zeros(len(gfilesInTimeWindow))
         B_0s = np.zeros(len(gfilesInTimeWindow))
-        gfileTimes = list(gfilesInTimeWindow.keys())
+        gfileTimes = np.sort(np.array(list(gfilesInTimeWindow.keys())))
 
-        fig,ax = plt.subplots()
         for j in range(len(gfilesInTimeWindow)):
             
             gfile = gfilesInTimeWindow[gfileTimes[j]]
-            #gfile_rho_n = gfile['RHOVN']
+            gfile_rho_n = gfile['RHOVN']
             psis_at_psiN[j,:] = gfile['fluxSurfaces']['geo']['psi']
-            #psis[j,:] = interp1d(gfile_rho_n, psi)(self.rho_n)
+            psis_at_rhoN[j,:] = interp1d(gfile_rho_n, psis_at_psiN[j,:], kind = 'cubic')(self.rho_n)
             rho_bndrys[j] = gfile['fluxSurfaces']['geo']['rho'][-1]
             B_0s[j] = gfile['BCENTR']
             
-            ax.plot(psis_at_psiN[j,:], label = gfileTimes[j])
-        ax.legend()
-        plt.show()
+            #fig,ax = plt.subplots()
+            #ax.scatter(gfile_rho_n,psis_at_psiN[j,:])
+            #plt.show()
 
         gfileIndex = np.argmin(np.abs(gfileTimes - self.timeSlices[timeIndex]))
         drho_bndry_dt = np.gradient(rho_bndrys, gfileTimes)*1e3 #convert from 1/ms to 1/s
         self.drho_bndry_dt[timeIndex] = drho_bndry_dt[gfileIndex]   
 
         local_psidot = np.zeros(len(gfile_psi_n))
-        for k in range(len(gfile_psi_n)):
-            local_psidot[k] = np.gradient(psis_at_psiN[:,k], gfileTimes)[gfileIndex]*1e3 #convert from 1/ms to 1/s
-        self.dpsi_dt[timeIndex, :] = interp1d(gfile_rho_n,local_psidot)(self.rho_n)
+        from scipy.interpolate import CubicSpline
+        for k in range(len(self.rho_n)):
+            intercept1, slope1 = self.getLinearFit(gfileTimes, psis_at_rhoN[:,k])
+            self.dpsi_dt[timeIndex, k] = slope1*1000
+
+            cs = CubicSpline(gfileTimes, psis_at_rhoN[:,k], bc_type='natural') 
+            x_new = np.linspace(gfileTimes[0], gfileTimes[-1], 100)
+            y_new = cs(x_new)
+            slope2 = cs(self.gfileTime[timeIndex],1)
+            #self.dpsi_dt[timeIndex, k] = 1e3*slope2
+            """
+            fig,ax = plt.subplots()
+            ax.scatter(gfileTimes, psis_at_rhoN[:,k], label = rf'$\psi (\rho_n = {self.rho_n[k]})$')
+            ax.plot(gfileTimes, gfileTimes*slope1 + intercept1, label =rf'linearfit result')
+            ax.set_ylabel(r'$\psi$')
+            ax.set_xlabel(r'gfile time (ms)')
+            #ax.plot(x_new, y_new, label =rf'$d \psi /dt$ = {slope2*1e3}')
+            ax.legend()
+            fig.tight_layout()
+            plt.show()
+            """
+
         self.dB0_dt[timeIndex] = np.gradient(B_0s, gfileTimes)[gfileIndex]*1e3
 
 
@@ -316,6 +409,9 @@ class pyLoop:
 
     #returns the bootstrap current, A/m^2
     def getBootstrapAndConductivity(self, t, dt, gfile, timeIndex, Z_impurity = 6):
+        if self.useKinetic:
+            self.collectKineticProfs(timeIndex)
+
         ne, ne_err, _, _ = self.get_ne(t, dt)
         Te, Te_err, _, _ = self.get_Te(t, dt)
         nC, nC_err, _, _ = self.get_nC(t, dt)
@@ -377,15 +473,37 @@ class pyLoop:
     # dtavg  = averaging time window for each analysis (msec)
     #             (t-dtavg/2 to t+dtavg/2)
     def nvloop(self):
-
+        
         #efitTimeNode = tree.getNode('RESULTS.GEQDSK.GTIME')
         gtimes = gadata.gadata('RESULTS.GEQDSK.GTIME', self.shot, tree = self.efitID).zdata
 
         for timeIndex in range(len(self.timeSlices)):
-            time = self.timeSlices[timeIndex]
-            mask = np.where((gtimes >= time - self.dt_avg/2)*
-                            (gtimes <= time + self.dt_avg/2))
-            relevantGfileTimes = gtimes[mask]
+            time = int(self.timeSlices[timeIndex])
+
+            if self.useKinetic:
+                dir_list = os.listdir(f'/home/rutherfordg/nvloop/{self.shot}.0{time}_kinetic_efits')
+                gfilesInTimeWindow = {}
+                relevantGfileTimes = []
+                for filename in dir_list:
+                    print(filename)
+                    if filename[0] != 'g':
+                        continue
+                    gtime = float(filename.split('.')[-1][1:])
+                    if time - self.dt_avg/2 <= gtime <= time + self.dt_avg/2:
+                        relevantGfileTimes.append(gtime)
+                        gfilesInTimeWindow[gtime]=omfit_eqdsk.OMFITgeqdsk(f'/home/rutherfordg/nvloop/{self.shot}.0{time}_kinetic_efits/{filename}')
+                relevantGfileTimes = np.array(relevantGfileTimes)
+                relevantGfileTimes.sort()
+                print(relevantGfileTimes)
+            else:
+                mask = np.where((gtimes >= time - self.dt_avg/2)*
+                                (gtimes <= time + self.dt_avg/2))
+                relevantGfileTimes = gtimes[mask]
+
+                gfilesInTimeWindow = omfit_eqdsk.from_mds_plus(device = 'd3d',shot = self.shot, 
+                        times = relevantGfileTimes, snap_file = self.efitID, 
+                        get_afile = False, get_mfile = False, quiet = True,
+                        time_diff_warning_threshold = 1)['gEQDSK']
 
             if time not in relevantGfileTimes:
                 print('***')
@@ -399,10 +517,6 @@ class pyLoop:
                 print('***')
                 continue
 
-            gfilesInTimeWindow = omfit_eqdsk.from_mds_plus(device = 'd3d',shot = self.shot, 
-                        times = relevantGfileTimes, snap_file = self.efitID, 
-                        get_afile = False, get_mfile = False, quiet = True,
-                        time_diff_warning_threshold = 1)['gEQDSK']
 
             gfileAtTime = gfilesInTimeWindow[float(time)]
             self.get_gfileQuantities(gfileAtTime, gfilesInTimeWindow, timeIndex)
@@ -421,38 +535,40 @@ class pyLoop:
 
             self.J_ohm[timeIndex,:] = self.E_para[timeIndex,:]*sigma_neo
             #"""
-            fig,axes = plt.subplots(nrows = 2, ncols = 2)
-            axes[0,0].plot(self.rho_n, np.abs(self.q[timeIndex,:]), lw = 2, label = r'$q$')
-            axes[0,0].set_ylabel('q')
+            fig,axes = plt.subplots(nrows = 2, ncols = 3)
+            axes[0,0].plot(self.rho_n, np.abs(self.q[timeIndex,:]), lw = 2)
+            axes[0,0].set_title('q')
             axes[0,0].set_xlabel(r'$\hat{\rho}$')
-            axes[0,0].set_ylim([1,7])
+            #axes[0,0].set_ylim([1,7])
 
-            axes[0,1].plot(self.rho_n, self.avgJpara[timeIndex,:]/1e6, lw = 2, label = r'$J_{||}$')
-            axes[0,1].set_ylabel(r'<$J_{||}$> (MA/m^2)')
+            axes[0,1].plot(self.rho_n, self.avgJpara[timeIndex,:]/1e6, lw = 2)
+            axes[0,1].set_title(r'<$J_{||}$> (MA/m^2)')
             axes[0,1].set_xlabel(r'$\hat{\rho}$')
             #axes[0,1].set_ylim([.2,1.2])
 
-            #axes[0,2].plot(self.rho_n, self.dpsi_dt[timeIndex,:], lw = 2, label = r'$dpsi_dt$')
-            #axes[0,2].set_ylabel(r'$\dot{\psi}$')
-            #axes[0,2].set_xlabel(r'$\hat{\rho}$')
+            axes[0,2].plot(self.rho_n, self.dpsi_dt[timeIndex,:], lw = 2)
+            axes[0,2].set_title(r'$\dot{\psi}$')
+            axes[0,2].set_xlabel(r'$\hat{\rho}$')
 
 
-            axes[1,0].plot(self.rho_n, self.voltage[timeIndex,:], lw = 2, label = r'$V_\phi$')
-            axes[1,0].set_ylabel(r'$V_\phi$ (V)')
+            axes[1,0].plot(self.rho_n, self.voltage[timeIndex,:], lw = 2)
+            axes[1,0].set_title(r'$V_\phi$ (V)')
             axes[1,0].set_xlabel(r'$\hat{\rho}$')
             #axes[1,0].set_ylim([-.15,.1])
 
             axes[1,1].plot(self.rho_n, self.E_para[timeIndex,:], lw = 2)
-            axes[1,1].set_ylabel(r'$E_{||}$ (V/m)')
+            axes[1,1].set_title(r'$E_{||}$ (V/m)')
             axes[1,1].set_xlabel(r'$\hat{\rho}$')
             #axes[1,1].set_ylim([-.015,.01])
 
-            #axes[1,2].plot(self.rho_n, self.ft[timeIndex,:], lw = 2, label = r'$f_t$')
-            #axes[1,2].set_ylabel('trapped fraction')
-            #axes[1,2].set_xlabel(r'$\hat{\rho}$')
-            #axes[1,2].set_ylim([0,.8])
+            #print(f'psi: {self.psi[timeIndex,:]}')
+            fig.suptitle(f'Shot {self.shot}, {self.timeSlices[timeIndex]} ms')
+            axes[1,2].plot(self.rho_n, self.psi[timeIndex,:],lw = 2)
+            axes[1,2].set_title(r'$\psi$')
+            axes[1,2].set_xlabel(r'$\hat{\rho}$')
 
             fig.tight_layout()
+            #"""
             #"""
             figJ, axesJ = plt.subplots(nrows = 2)
             axesJ[0].plot(self.rho_n, self.J_ohm[timeIndex,:]/1e6, lw = 2, label = r'$J_{ohm}$')
@@ -465,14 +581,45 @@ class pyLoop:
             axesJ[1].set_xlabel(r'$\hat{\rho}$')
             axesJ[1].set_ylabel(r'$J_{NI}$ (MA/m^2)')
             axesJ[0].set_ylabel(r'$J$ (MA/m^2)')
+
+            #if np.sign(J_NI[0]) > 0:
+            #axesJ[1].set_ylim([-1,1.5])
+            #else:
+            #    axesJ[1].set_ylim([-1.5,.5])
+
             #axesJ[0].set_ylim([-.5,1.5])
-            #axesJ[1].set_ylim([-.5,1.5])
+            #
             axesJ[0].legend()
-            #"""
+            figJ.suptitle(f'Shot {self.shot}, {self.timeSlices[timeIndex]} ms')
             figJ.tight_layout()
-            plt.show()
             #"""
+            
+            figVER,axesVER  = plt.subplots(nrows=3, figsize = (8,8))
+            axesVER[0].plot(self.rho_n, self.voltage[timeIndex], lw = 2)
+            axesVER[0].set_ylabel('Voltage (V)')
+            axesVER[0].set_xlabel(r'$\hat{\rho}$')
+            #axesVER[0].set_ylim([-.7,-.05])
+            #axesVER[0].set_yticks([-.65,-.45,-.25,-.05])
+            axesVER[0].grid()
+
+            axesVER[1].plot(self.rho_n, self.E_para[timeIndex], lw = 2)
+            axesVER[1].set_ylabel('E|| (V/m)')
+            axesVER[1].set_xlabel(r'$\hat{\rho}$')
+            #axesVER[1].set_ylim([-.1,0])
+            axesVER[1].grid()
+
+            axesVER[2].plot(self.rho_n, sigma_neo, lw = 2)
+            axesVER[2].set_ylabel(r'$\sigma_{neo}$ ($1/ \Omega m$)')
+            axesVER[2].set_xlabel(r'$\hat{\rho}$')
+            #axesVER[2].set_ylim([0,1.2e8])
+            axesVER[2].grid()
+
+            figVER.suptitle(f'Shot {self.shot}, {self.timeSlices[timeIndex]} ms')
+            figVER.tight_layout()
+            
+            #"""
+            plt.show()
  #use 03 for compare since it's broken           
-loop = pyLoop(202162, [1800.0], dt_avg = 100, efitID = 'EFIT02er')
+loop = pyLoop(179172, [2900.0], dt_avg = 600, efitID = 'EFIT02er', useKinetic = False)
 loop.nvloop()
 
