@@ -12,7 +12,7 @@ import os
 import netCDF4
 from scipy.optimize import curve_fit
 import time
-import omfit_eqdskFast 
+import omfit_eqdsk_fast 
 class pyLoop:
 
     def __init__(self,shot, time, efitID = 'EFIT02er', nrho=101, 
@@ -49,8 +49,8 @@ class pyLoop:
             if self.shot == 179173:
                 targetDir = '/fusion/projects/xpsi/petty/analysis/20190717/shot179173/cos2_er/460_390/'
                 self.collectCraigProfs(targetDir)
-            elif self.shot == 179172:
-                targetDir = '/fusion/projects/xpsi/petty/analysis/20190717/shot179172/cos2_er/460_390/'
+            elif self.shot == 179186:
+                targetDir = '/fusion/projects/xpsi/petty/analysis/20190717/shot179186/cos2_er/460_390/'
                 self.collectCraigProfs(targetDir)
             elif self.shot == 179587:
                 #targetDir = '/fusion/projects/xpsi/petty/analysis/20190807/shot179587/cos2_er/eccd/'
@@ -129,7 +129,6 @@ class pyLoop:
         from scipy.io import readsav
         import os
         directory = os.listdir(targetDir)
-
         searchString = f'dne{self.shot}.0'
         for fname in directory:
             if not (searchString in fname):
@@ -500,13 +499,6 @@ class pyLoop:
         #car = los
         """
 
-        J_BS_prof = self.currentSign*utils_fusion.sauter_bootstrap(gEQDSKs = gfile, psi_N = self.psi_n, 
-                Ti = np.array([Ti]), ne = np.array([ne]), Te = np.array([Te]),
-                charge_number_to_use_in_ion_collisionality = 'Zavg', 
-                charge_number_to_use_in_ion_lnLambda = 'Zavg',
-                Zis=[1,6], nis = np.array([[nD], [nC]]),
-                R0 = 1.6955, p = np.array([pressure]), version = 'osborne')[0]
-
         J_BS_prof_1 = self.currentSign*utils_fusion.sauter_bootstrap(
                 psi_N = np.array([self.psi_n]), q = np.array([self.q]), 
                 fT = np.array([self.ft]), eps = np.array([self.eps]),
@@ -576,24 +568,15 @@ class pyLoop:
         print(f'{madeVarsTime-startTime} to make variables')
 
         for j in range(num_gfiles):
-            topLoopTime = prevTime = time.time()
             gfile = gfilesInTimeWindow[gfileTimes[j]]
-            nowTime = time.time()
-            #print(f'{nowTime - prevTime} to get gfile')
             fluxSurfaces = gfile['fluxSurfaces']
-            #print(fluxSurfaces.calculateAvgGeo)
-            prevTime = nowTime; nowTime = time.time()
-            #print(f'{nowTime - prevTime} to get fluxSurface')
             geo = fluxSurfaces['geo']
-            prevTime = nowTime; nowTime = time.time()
-            #print(f'{nowTime - prevTime} to get geo')
             avg = fluxSurfaces['avg']
-            prevTime = nowTime; nowTime = time.time()
-            #print(f'{nowTime - prevTime} to get avg')
             
             setupTime = time.time()
 
-            #print(type(avg.data), type(geo), type(fluxSurfaces))
+            print(f'{setupTime-madeVarsTime} to get gfile, avg, geo')
+
             avgr = avg['a']
             avgR = avg['R']
             avgB2 = avg['Btot**2']
@@ -601,14 +584,14 @@ class pyLoop:
             q = avg['q']
 
             avgTime = time.time()
-            #print(f'{avgTime-setupTime} to look at avgs')
+            print(f'{avgTime-setupTime} to read from avgs')
 
             gfile_psi = geo['psi']
             eps = geo['eps']
             rho_bndrys[j] = geo['rho'][-1]
 
             geoTime = time.time()
-            #print(f'{geoTime-avgTime} to look at geo')
+            print(f'{geoTime-avgTime} to read from geo')
 
             gfile_rho_n = gfile['RHOVN']
             gfile_psi_n = fluxSurfaces['levels']
@@ -618,7 +601,7 @@ class pyLoop:
             B_0s[j] = gfile['BCENTR']
 
             gfileQuantsTime = time.time()
-            #print(f'{gfileQuantsTime-geoTime} to finish')
+            print(f'{gfileQuantsTime-geoTime} to finish')
 
             fs[j,:] = interp1d(gfile_rho_n, f, kind = 'cubic')(self.rho_n)
             epss[j,:] = interp1d(gfile_rho_n, eps, kind = 'cubic')(self.rho_n)
@@ -632,7 +615,9 @@ class pyLoop:
             psi_ns[j,:] = interp1d(gfile_rho_n, gfile_psi_n, kind = 'cubic')(self.rho_n)
             psis[j,:] = interp1d(gfile_rho_n, gfile_psi, kind = 'cubic')(self.rho_n)   
 
-            #print(f'{time.time()-gfileQuantsTime} to interp')
+            print(f'{time.time()-gfileQuantsTime} to interp')
+
+            car = los
 
 
         getQuantsTime = time.time()
@@ -700,11 +685,10 @@ class pyLoop:
                 gtime = float(filename.split('.')[-1][1:])
                 if self.time - self.dt_avg/2 <= gtime <= self.time + self.dt_avg/2:
                     relevantGfileTimes.append(gtime)
-                    gfilesInTimeWindow[gtime]=omfit_eqdsk.OMFITgeqdsk(f'/home/rutherfordg/nvloop/{self.shot}.0{time}_kinetic_efits/{filename}')
+                    gfilesInTimeWindow[gtime]=omfit_eqdsk_fast.OMFITgeqdsk_fast(f'/home/rutherfordg/nvloop/{self.shot}.0{time}_kinetic_efits/{filename}')
             relevantGfileTimes = np.array(relevantGfileTimes)
             relevantGfileTimes.sort()
-            print(relevantGfileTimes)
-        elif str(self.shot)[:3] == '179':
+        elif self.shot in [179173, 179186, 179592, 179587]:
             targetDir = ''
             if self.shot == 179173:
                 targetDir = '/fusion/projects/xpsi/petty/analysis/20190717/shot179173/cos2_er/460_390'
@@ -725,7 +709,7 @@ class pyLoop:
                 gtime = float(filename.split('.')[-1][1:])
                 if self.time - self.dt_avg/2 <= gtime <= self.time + self.dt_avg/2:
                     relevantGfileTimes.append(gtime)
-                    gfilesInTimeWindow[gtime]=omfit_eqdsk.OMFITgeqdsk(f'{targetDir}/{filename}')
+                    gfilesInTimeWindow[gtime]=omfit_eqdsk_fast.OMFITgeqdsk_fast(f'{targetDir}/{filename}')
             relevantGfileTimes = np.array(relevantGfileTimes)
             relevantGfileTimes.sort()
         else:
@@ -733,7 +717,7 @@ class pyLoop:
                             (gtimes <= self.time + self.dt_avg/2))
             relevantGfileTimes = gtimes[mask]
 
-            gfilesInTimeWindow = omfit_eqdsk.from_mds_plus(device = 'd3d',shot = self.shot, 
+            gfilesInTimeWindow = omfit_eqdsk_fast.from_mds_plus(device = 'd3d',shot = self.shot, 
                     times = relevantGfileTimes, snap_file = self.efitID, 
                     get_afile = False, get_mfile = False, quiet = True,
                     time_diff_warning_threshold = 1)['gEQDSK']
@@ -782,6 +766,29 @@ class pyLoop:
         #"""
         self.E_para = ((self.voltage-vv2)*
                     self.avgBphi2/(2*np.pi*self.B_0*self.f))
+
+        fig,ax = plt.subplots()
+        ax.plot(self.rho_n, self.voltage, lw = 2, label = 'with correction')
+        ax.plot(self.rho_n, 2*np.pi*self.dpsi_dt, lw = 2, label = 'no correction')
+        ax.set_xlabel(f'rho_n')
+        ax.set_ylabel(f'Voltage')
+        ax.legend()
+        ax.set_box_aspect(1)
+        fig.tight_layout()
+        plt.show()
+
+        fig,ax = plt.subplots()
+        ax.plot(self.rho_n, self.E_para, lw = 2, label = 'with correction')
+        ax.plot(self.rho_n, ((self.voltage)*self.avgBphi2/(2*np.pi*self.B_0*self.f)), lw = 2, label = 'no E correction')
+        ax.plot(self.rho_n, ((2*np.pi*self.dpsi_dt)*self.avgBphi2/(2*np.pi*self.B_0*self.f)), lw = 2, label = 'no E or V correction')
+        ax.set_xlabel(f'rho_n')
+        ax.set_ylabel(f'E||')
+        ax.legend()
+        ax.set_box_aspect(1)
+        fig.tight_layout()
+        plt.show()
+
+            
 
         self.J_ohm = self.E_para*sigma_neo
         self.J_NI = self.avgJpara-self.J_BS-self.J_ohm 
@@ -875,11 +882,11 @@ class pyLoop:
             """
             plt.show() 
                    
-#loop = pyLoop(179172, [2900.0], dt_avg = 600, efitID = 'EFIT02', useKinetic = False)
+loop = pyLoop(179173, 2900.0, dt_avg = 600, efitID = 'EFIT02', useKinetic = False)
 #loop = pyLoop(147634, 4505.0, dt_avg = 1000, efitID = 'EFIT02', useKinetic = False, doPlot = True, outlierTimes = [4055,4405,4605])
 #loop = pyLoop(179173, 1500, dt_avg = 200, efitID = 'EFIT02er', useKinetic = False, doPlot = True, outlierTimes = [])
 #loop = pyLoop(202158, 1300.0, dt_avg = 200, efitID = 'EFIT02er', doPlot = False, outlierTimes = [1100])
-#loop.nvloop()
+loop.nvloop()
 
 
 

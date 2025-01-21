@@ -30,13 +30,11 @@ class fluxSurfaces_minimal(fluxSurface.fluxSurfaces):
         # define handy function for flux-surface averaging
         def flxAvg(k, input):
             return np.sum(self.fluxexpansion_dl[k] * input) / self.int_fluxexpansion_dl[k]
-
+        print(f'self.nc: {self.nc}')
         # if user wants flux-surface averaging of a specific function, then calculate and return it
         if function is not None:
             if 'avg' not in self:
                 self.surfAvg()
-            if not self.quiet:
-                printi('Flux surface averaging of user defined quantity ...')
             avg = np.zeros((self.nc))
             for k in range(self.nc):
                 avg[k] = flxAvg(k, function(self['flux'][k]['R'], self['flux'][k]['Z']))
@@ -520,7 +518,7 @@ class fluxSurfaces_minimal(fluxSurface.fluxSurfaces):
         if not self.quiet:
             printi('  > Took {:}'.format(datetime.datetime.now() - t0))
         """
-        print(f'{time.time() - startTime} to finish')
+        print(f'{time.time() - startTime} to get through fluxSurfaces')
 
 
 
