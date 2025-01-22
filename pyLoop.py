@@ -13,6 +13,24 @@ import netCDF4
 from scipy.optimize import curve_fit
 import time
 import omfit_eqdsk_fast 
+
+"""
+0.03351449966430664 to get gfile
+0.016179561614990234 to get through first for loop
+0.11666393280029297 to get through surfavg
+0.7310614585876465 to findSurfaces
+0.9387607574462891 to get geo
+5.9604644775390625e-06 to get avg
+1.1444091796875e-05 to read from avgs
+6.9141387939453125e-06 to read from geo
+0.15729761123657227 to finish
+0.002355813980102539 to interp
+
+What is taking the longest is fluxSurfaces' findSurfaces method
+
+"""
+
+
 class pyLoop:
 
     def __init__(self,shot, time, efitID = 'EFIT02er', nrho=101, 
@@ -468,7 +486,7 @@ class pyLoop:
         return Zeff, Zeff_err, dZeff_drhon, dZeff_drhon_err
 
     #returns the bootstrap current, A/m^2
-    def getBootstrapAndConductivity(self, t, dt, gfile, Z_impurity = 6):
+    def getBootstrapAndConductivity(self, t, dt, Z_impurity = 6):
         if self.useKinetic:
             self.collectKineticProfs()
 
@@ -542,7 +560,6 @@ class pyLoop:
     #   hcap    = dV/(2*pi*R_zero)/(2*pi*rho*drho)
     #   bphirb  = <|B_phi/RB|>
     def get_gfileQuantities(self,gfileAtTime, gfilesInTimeWindow):
-        startTime = time.time()
         ###First get the quantities that don't need multiple gfiles
         #We're not going to average them since there is a gfile at our chosen time
         self.currentSign = np.sign(gfileAtTime['CURRENT'])
@@ -563,19 +580,13 @@ class pyLoop:
 
         gfileTimes = np.sort(np.array(list(gfilesInTimeWindow.keys())))
         num_gfiles = len(gfilesInTimeWindow)
-    
-        madeVarsTime = time.time()
-        print(f'{madeVarsTime-startTime} to make variables')
 
         for j in range(num_gfiles):
+            
             gfile = gfilesInTimeWindow[gfileTimes[j]]
             fluxSurfaces = gfile['fluxSurfaces']
-            geo = fluxSurfaces['geo']
-            avg = fluxSurfaces['avg']
-            
-            setupTime = time.time()
-
-            print(f'{setupTime-madeVarsTime} to get gfile, avg, geo')
+            geo = fluxSurfaces['geo']           
+            avg = fluxSurfaces['avg']     
 
             avgr = avg['a']
             avgR = avg['R']
@@ -583,15 +594,9 @@ class pyLoop:
             avgBphi2 = avg['Bt**2']
             q = avg['q']
 
-            avgTime = time.time()
-            print(f'{avgTime-setupTime} to read from avgs')
-
             gfile_psi = geo['psi']
             eps = geo['eps']
             rho_bndrys[j] = geo['rho'][-1]
-
-            geoTime = time.time()
-            print(f'{geoTime-avgTime} to read from geo')
 
             gfile_rho_n = gfile['RHOVN']
             gfile_psi_n = fluxSurfaces['levels']
@@ -599,9 +604,6 @@ class pyLoop:
             avgJpara = gfile.surfAvg('Jpar', interp = 'cubic')*self.currentSign
             ft = utils_fusion.f_t(r_minor = avgr, R_major = avgR)
             B_0s[j] = gfile['BCENTR']
-
-            gfileQuantsTime = time.time()
-            print(f'{gfileQuantsTime-geoTime} to finish')
 
             fs[j,:] = interp1d(gfile_rho_n, f, kind = 'cubic')(self.rho_n)
             epss[j,:] = interp1d(gfile_rho_n, eps, kind = 'cubic')(self.rho_n)
@@ -615,13 +617,6 @@ class pyLoop:
             psi_ns[j,:] = interp1d(gfile_rho_n, gfile_psi_n, kind = 'cubic')(self.rho_n)
             psis[j,:] = interp1d(gfile_rho_n, gfile_psi, kind = 'cubic')(self.rho_n)   
 
-            print(f'{time.time()-gfileQuantsTime} to interp')
-
-            car = los
-
-
-        getQuantsTime = time.time()
-        print(f'{getQuantsTime - madeVarsTime} to get quants from omfit')
         for k in range(len(self.rho_n)):
             self.f[k] = self.getLinearFit(gfileTimes, fs[:,k],self.time)[0]
             self.eps[k] = self.getLinearFit(gfileTimes, epss[:,k],self.time)[0]
@@ -655,10 +650,6 @@ class pyLoop:
             
         self.drho_bndry_dt = self.getLinearFit(gfileTimes, rho_bndrys,self.time, returnCoefs = True)[2]*1000  
         self.dB0_dt = self.getLinearFit(gfileTimes, B_0s,self.time, returnCoefs = True)[2]*1000 
-        fitTime = time.time()
-        print(f'{fitTime - getQuantsTime} to do fits')
-
-
 
     #shot   = shot number
     # t1     = time for first vloop analysis (msec)
@@ -668,8 +659,7 @@ class pyLoop:
     # dtavg  = averaging time window for each analysis (msec)
     #             (t-dtavg/2 to t+dtavg/2)
     def nvloop(self):
-        currentTime = time.time()
-        previousTime = time.time()
+        startTime = time.time()
         #efitTimeNode = tree.getNode('RESULTS.GEQDSK.GTIME')
         gtimes = gadata.gadata('RESULTS.GEQDSK.GTIME', self.shot, tree = self.efitID).zdata
 
@@ -717,14 +707,10 @@ class pyLoop:
                             (gtimes <= self.time + self.dt_avg/2))
             relevantGfileTimes = gtimes[mask]
 
-            gfilesInTimeWindow = omfit_eqdsk_fast.from_mds_plus(device = 'd3d',shot = self.shot, 
+            gfilesInTimeWindow = omfit_eqdsk.from_mds_plus(device = 'd3d',shot = self.shot, 
                     times = relevantGfileTimes, snap_file = self.efitID, 
                     get_afile = False, get_mfile = False, quiet = True,
                     time_diff_warning_threshold = 1)['gEQDSK']
-
-        currentTime = time.time()
-        print(f'getting profiles and gfiles took {currentTime-previousTime}')
-        previousTime = currentTime
 
         gfileTimes = gfilesInTimeWindow.keys()
         for outlierTime in self.outlierTimes:
@@ -747,18 +733,9 @@ class pyLoop:
         gfileAtTime = gfilesInTimeWindow[float(self.time)]
         self.get_gfileQuantities(gfileAtTime, gfilesInTimeWindow)
 
-        currentTime = time.time()
-        print(f'getting gfile quantities took {currentTime-previousTime}')
-        previousTime = currentTime
-
-        J_BS, sigma_neo = self.getBootstrapAndConductivity(self.time, self.dt_avg, 
-                            gfileAtTime)
+        J_BS, sigma_neo = self.getBootstrapAndConductivity(self.time, self.dt_avg)
         self.J_BS = J_BS
         
-        currentTime = time.time()
-        print(f'getting BS took {currentTime-previousTime}')
-        previousTime = currentTime
-
         vv1 = 2*np.pi*self.rho_n**2*(self.B_0/self.q[:])*self.rho_bndry*self.drho_bndry_dt
         vv2 = np.pi*self.rho_bndry**2*self.rho_n**2*self.dB0_dt/(self.q)
         self.voltage = 2*np.pi*self.dpsi_dt - vv1
@@ -766,7 +743,7 @@ class pyLoop:
         #"""
         self.E_para = ((self.voltage-vv2)*
                     self.avgBphi2/(2*np.pi*self.B_0*self.f))
-
+        """
         fig,ax = plt.subplots()
         ax.plot(self.rho_n, self.voltage, lw = 2, label = 'with correction')
         ax.plot(self.rho_n, 2*np.pi*self.dpsi_dt, lw = 2, label = 'no correction')
@@ -787,13 +764,12 @@ class pyLoop:
         ax.set_box_aspect(1)
         fig.tight_layout()
         plt.show()
-
+        """
             
-
         self.J_ohm = self.E_para*sigma_neo
         self.J_NI = self.avgJpara-self.J_BS-self.J_ohm 
-
-        if self.doPlot:
+        print(f'{time.time() - startTime} to do nvloop')
+        if self.doPlot: 
             self.plot()
 
 
@@ -882,8 +858,8 @@ class pyLoop:
             """
             plt.show() 
                    
-loop = pyLoop(179173, 2900.0, dt_avg = 600, efitID = 'EFIT02', useKinetic = False)
-#loop = pyLoop(147634, 4505.0, dt_avg = 1000, efitID = 'EFIT02', useKinetic = False, doPlot = True, outlierTimes = [4055,4405,4605])
+#loop = pyLoop(179587, 1900.0, dt_avg = 800, efitID = 'EFIT02', useKinetic = False, doPlot = True)
+loop = pyLoop(147634, 4500.0, dt_avg = 1000, efitID = 'EFIT02', useKinetic = False, doPlot = True, outlierTimes = [])
 #loop = pyLoop(179173, 1500, dt_avg = 200, efitID = 'EFIT02er', useKinetic = False, doPlot = True, outlierTimes = [])
 #loop = pyLoop(202158, 1300.0, dt_avg = 200, efitID = 'EFIT02er', doPlot = False, outlierTimes = [1100])
 loop.nvloop()

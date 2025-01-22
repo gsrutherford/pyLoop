@@ -43,7 +43,6 @@ class fluxSurfaces_minimal(fluxSurface.fluxSurfaces):
         # define handy function for flux-surface averaging
         def flxAvg(k, input):
             return np.sum(self.fluxexpansion_dl[k] * input) / self.int_fluxexpansion_dl[k]
-        print(f'self.nc: {self.nc}')
         # if user wants flux-surface averaging of a specific function, then calculate and return it
         if function is not None:
             if 'avg' not in self:
@@ -89,8 +88,6 @@ class fluxSurfaces_minimal(fluxSurface.fluxSurfaces):
         ]:
             self['avg'][item] = np.zeros((self.nc))
         
-        beforeLoop = time.time()
-
         for k in range(self.nc):
             Bp2 = self['flux'][k]['Br'] ** 2 + self['flux'][k]['Bz'] ** 2
             signBp = (
@@ -140,7 +137,6 @@ class fluxSurfaces_minimal(fluxSurface.fluxSurfaces):
             )
             #grad_parallel = np.diff(B) / self.fluxexpansion_dl[k][1:] / B[1:]
             #self['avg']['grad_term'][k] = np.sum(self.fluxexpansion_dl[k][1:] * grad_parallel**2) / self.int_fluxexpansion_dl[k]
-        print(f'{time.time() - beforeLoop} to get through first for loop')
         # q on axis by extrapolation
         if self['levels'][0] == 0:
             x = self['levels'][1:]
@@ -182,7 +178,6 @@ class fluxSurfaces_minimal(fluxSurface.fluxSurfaces):
         else:
             if 'rhon' in self['geo']:
                 del self['geo']['rhon']
-        print(f'{time.time() - startTime} to get through fluxSurfaces')
 
 def fluxGeo(inputR, inputZ, lcfs=False, doPlot=False):
     '''
@@ -238,6 +233,7 @@ def fluxGeo(inputR, inputZ, lcfs=False, doPlot=False):
     #geo['Z'] = 0.5 * (max_z + min_z)
     geo['a'] = 0.5 * (max_r - min_r)
     geo['eps'] = geo['a'] / geo['R']
+
     return geo
 
 

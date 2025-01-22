@@ -1,7 +1,23 @@
 from omfit_classes.omfit_eqdsk import OMFITgeqdsk
 from fluxSurfacesMinimal import fluxSurfaces_minimal
+import os 
+import numpy as np
+import matplotlib.pyplot as plt
+from omfit_classes.sortedDict import SortedDict
+from omfit_classes.omfit_ascii import OMFITascii
+from scipy import interpolate
+import time
 
 class OMFITgeqdsk_fast(OMFITgeqdsk):
+
+    def __init__(self, filename, **kw):
+        OMFITascii.__init__(self, filename, **kw)
+        SortedDict.__init__(self, caseInsensitive=True)
+        self._cocos = 1
+        self._AuxNamelistString = None
+        self.dynaLoad = True
+
+
     def addFluxSurfaces(self, **kw):
         r"""
         Adds ['fluxSurface'] to the current object
@@ -40,7 +56,5 @@ class OMFITgeqdsk_fast(OMFITgeqdsk):
             self['fluxSurfaces'] = OMFITerror('Error tracing flux surfaces: ' + repr(_excp))
 
         return self['fluxSurfaces']
-
-
 
 
