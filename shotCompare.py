@@ -1,11 +1,40 @@
 import pyLoop
 import matplotlib.pyplot as plt
-
+import numpy as np
 plt.rc('xtick', labelsize = 14)
 plt.rc('ytick', labelsize = 14)
 plt.rc('axes', labelsize = 16)
 plt.rc('axes', titlesize = 16)
 plt.rc('legend', fontsize = 14)
+
+def compareMDSefits():
+    start = 3900
+    stop = 5700
+    time = (start + stop)/2
+    dt = stop - start
+
+    shot = 172538
+    loop_01 = pyLoop.pyLoop(shot, time, dt_avg = dt,efitID = 'EFIT01', doPlot = False)
+    loop_02 = pyLoop.pyLoop(shot, time, dt_avg = dt,efitID = 'EFIT02', doPlot = False)
+    loop_02er = pyLoop.pyLoop(shot, time, dt_avg = dt,efitID = 'EFIT02er', doPlot = False)
+    loop_kin = pyLoop.pyLoop(shot, time, dt_avg = dt,efitID = 'EFIT02er', doPlot = False, useKinetic = True)
+
+    loop_01.nvloop()
+    loop_02.nvloop()
+    loop_02er.nvloop()
+    loop_kin.nvloop()
+
+    fig,ax = plt.subplots()
+    ax.set_ylabel(r'E (V/m)')
+    ax.set_xlabel(r'$\hat{\rho}$')
+    ax.plot(loop_01.rho_n, loop_01.E_para, label = 'EFIT01')
+    ax.plot(loop_02.rho_n, loop_02.E_para, label = 'EFIT02')
+    ax.plot(loop_02er.rho_n, loop_02er.E_para, label = 'EFIT02er')
+    ax.plot(loop_kin.rho_n, loop_kin.E_para, label = 'kinetic')
+    ax.legend()
+    ax.set_title(f'{shot} {start}-{stop} ms')
+    fig.tight_layout()
+    plt.show()
 
 def compareShotsToplaunch():
     start = 1500
@@ -73,67 +102,62 @@ def compareShotsToplaunch():
     plt.show()
     """
 
-def compareShotsHelicon():
-    """
-    loop_202156_1340 = pyLoop.pyLoop(202156, 1340.0, dt_avg = 300, 
-        efitID = 'EFIT02er', outlierTimes = [1440,1500],doPlot = False)
-    loop_202156_1300 = pyLoop.pyLoop(202156, 1300.0, dt_avg = 400,
-        efitID = 'EFIT02er', outlierTimes = [1440,1500],doPlot = False)
+def compareTwoShots(refShot, CDShot, startTime, endTime):
+    dt = endTime - startTime
+    time = startTime + dt/2
 
-    loop_202156_1340.nvloop()
-    loop_202156_1300.nvloop()
-    """
-    fig,ax = plt.subplots(figsize=(10,6))
+    loop_ref = pyLoop.pyLoop(refShot, time, dt_avg = dt,
+        efitID = 'EFIT02',doPlot = False)
 
-    """
-    ax.plot(loop_202156_1340.rho_n, loop_202156_1340.J_NI/1e4, lw = 2, color = 'tab:blue', label = r'1200-1500 $J_{NI}$')
-    ax.plot(loop_202156_1300.rho_n, loop_202156_1300.J_NI/1e4, lw = 2, color = 'tab:blue', linestyle = 'dashed',label = r'1100-1500 $J_{NI}$')
-    ax.plot(loop_202156_1340.rho_n, loop_202156_1340.J_ohm/1e4, lw = 2, color = 'tab:orange', label = r'1200-1500 $J_{ohm}$')
-    ax.plot(loop_202156_1300.rho_n, loop_202156_1300.J_ohm/1e4, lw = 2, color = 'tab:orange', linestyle = 'dashed',label = r'1100-1500 ${ohm}$')
-    ax.plot(loop_202156_1340.rho_n, loop_202156_1340.J_BS/1e4, lw = 2, color = 'tab:red', label = r'1200-1500 $J_{BS}$')
-    ax.plot(loop_202156_1300.rho_n, loop_202156_1300.J_BS/1e4, lw = 2, color = 'tab:red', linestyle = 'dashed',label = r'1100-1500 $J_{BS}$')
-    ax.plot(loop_202156_1340.rho_n, loop_202156_1340.avgJpara/1e4, lw = 2, color = 'tab:green', label = r'1200-1500 $J_{||}$')
-    ax.plot(loop_202156_1300.rho_n, loop_202156_1300.avgJpara/1e4, lw = 2, color = 'tab:green', linestyle = 'dashed',label = r'1100-1500 $J_{||}$')
-    """
-    #"""
-    time = 1340.0
-    dt = 300
+    loop_CD = pyLoop.pyLoop(CDShot, time, dt_avg = dt,
+        efitID = 'EFIT02',doPlot = False)
 
-    loop_202156 = pyLoop.pyLoop(202156, time, dt_avg = dt,
-        efitID = 'EFIT02er', outlierTimes = [1440,1500],doPlot = False)
-    loop_202159 = pyLoop.pyLoop(202159, time, dt_avg = dt, 
-        efitID = 'EFIT02er', doPlot = False, outlierTimes = [1400])
-    loop_202158 = pyLoop.pyLoop(202158, time, dt_avg = dt, 
-        efitID = 'EFIT02er', doPlot = False, outlierTimes = [1100])
-    loop_202155 = pyLoop.pyLoop(202155, time, dt_avg = dt, efitID = 'EFIT02er', doPlot = False)
+    loop_ref.nvloop()
+    loop_CD.nvloop()
 
-    loop_202156.nvloop()
-    loop_202159.nvloop()
-    loop_202158.nvloop()
-    loop_202155.nvloop()
+    fig,axes = plt.subplots(figsize = (6,9), nrows = 2)
 
-    NI_156 = loop_202156.J_NI
-    NI_158 = loop_202158.J_NI
-    NI_159 = loop_202159.J_NI
-    NI_155 = loop_202155.J_NI
+    deltaNI = (loop_CD.J_NI - loop_ref.J_NI)
+    deltaBS = (loop_CD.J_BS - loop_ref.J_BS) 
+    deltaOhm = (loop_CD.J_ohm - loop_ref.J_ohm)
 
-    ax.plot(loop_202156.rho_n, (NI_156 -NI_156)*1e-4, label = "no helicon or ECH", lw = 2)
-    ax.plot(loop_202156.rho_n, (NI_156 -NI_159)*1e-4, label = "Helicon 710-1710", lw = 2)
-    ax.plot(loop_202156.rho_n, (NI_156 -NI_158)*1e-4, label = "Helicon 1110-2110", lw = 2)
-    ax.plot(loop_202156.rho_n, (NI_156 -NI_155)*1e-4, label = "ECH 710-1710", lw = 2)
-    ax.set_title(f'All shots averaged from {time-dt/2} - {time+dt/2} ms')
-
-    ax.set_ylabel(r'$J_{NI, 202156} - J_{NI,X}$ (A/cm^2)')
-    ax.set_ylim([-20,100])
-    #"""
+    axes[0].plot(loop_ref.rho_n, deltaNI/1e6, label = r'$\Delta$ $J_{NI}$', lw = 2)
+    axes[0].plot(loop_ref.rho_n, deltaBS/1e6, label = r'$\Delta$ $J_{BS}$', lw = 2)
+    axes[0].plot(loop_ref.rho_n, deltaOhm/1e6, label = r'$\Delta$ $J_{ohm}$', lw = 2)
     
-    ax.legend(ncol = 1)
-    ax.set_xlabel(r'$\rho_n$')
-    #ax.set_title('Shot 202156')
+    rho_n_midpoints = (loop_ref.rho_n[:-1] + loop_ref.rho_n[1:])/2
+    dArea = loop_ref.avgCXarea[1:] - loop_ref.avgCXarea[:-1]
+    dDeltaNI = (deltaNI[1:] + deltaNI[:-1])/2
+    dDeltaBS = (deltaBS[1:] + deltaBS[:-1])/2
+    dDeltaOhm = (deltaOhm[1:] + deltaOhm[:-1])/2
+
+    axes[1].plot(rho_n_midpoints, np.cumsum(dArea*dDeltaNI)/1e3, label = r'$\Delta$ $J_{NI}$')
+    axes[1].plot(rho_n_midpoints, np.cumsum(dArea*dDeltaBS)/1e3, label = r'$\Delta$ $J_{BS}$')
+    axes[1].plot(rho_n_midpoints, np.cumsum(dArea*dDeltaOhm)/1e3, label = r'$\Delta$ $J_{ohm}$')
+
+
+    axes[0].set_ylabel(rf'$J_{{{CDShot}, {{X}}}} - J_{{{refShot}, {{X}}}}$ (MA/m^2)')
+    #axes[0].set_ylim([-100,100])
+    axes[0].legend(ncol = 1)
+    axes[0].set_xlabel(r'$\rho_n$')
+
+    fig.suptitle(f'All shots averaged from {startTime} - {endTime} ms')
+    axes[1].set_ylabel(r'$\int \Delta$ $J_{X}$ (kA)')
+    #axes[1].set_ylim([-100,100])
+    axes[1].legend(ncol = 1)
+    axes[1].set_xlabel(r'$\rho_n$')
+
     fig.tight_layout()
     plt.show()
 
-compareShotsToplaunch()
+
+def compareShotsHelicon():
+    startTime = 1110
+    endTime = 1510
+
+    compareTwoShots(202156, 202159, startTime, endTime)
+
+compareShotsHelicon()
 
 
 

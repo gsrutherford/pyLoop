@@ -14,6 +14,12 @@ from scipy.optimize import curve_fit
 import time
 import omfit_eqdsk_fast 
 
+plt.rc('xtick', labelsize = 14)
+plt.rc('ytick', labelsize = 14)
+plt.rc('axes', labelsize = 16)
+plt.rc('axes', titlesize = 16)
+plt.rc('legend', fontsize = 14)
+
 """
 0.03351449966430664 to get gfile
 0.016179561614990234 to get through first for loop
@@ -93,6 +99,7 @@ class pyLoop:
         self.avgJpara = np.zeros(nrho)
         self.q = np.zeros(nrho)
         self.ft = np.zeros(nrho)
+        self.avgCXarea = np.zeros(nrho)
         #self.grad_term = np.zeros(nrho)
         #self.fcap = np.zeros(nrho)
         #self.gcap = np.zeros(nrho)
@@ -118,7 +125,7 @@ class pyLoop:
     #Temperature in units of keV
     #density in units of 1/m^3
     def collectKineticProfs(self):
-        profile_nc = netCDF4.Dataset(f'/home/rutherfordg/nvloop/{self.shot}.0{self.time}_kinetic_profs.nc')
+        profile_nc = netCDF4.Dataset(f'/home/rutherfordg/nvloop/{self.shot}_kinetic_efits/{self.shot}_kineticProfs.nc')
         self.Te_fit_rho_n = profile_nc.variables['rho'][:]
         self.Ti_fit_rho_n = profile_nc.variables['rho'][:]
         self.nC_fit_rho_n = profile_nc.variables['rho'][:]
@@ -559,10 +566,9 @@ class pyLoop:
     #   gcap    = <B_pol^2>/B_pol0^2
     #   hcap    = dV/(2*pi*R_zero)/(2*pi*rho*drho)
     #   bphirb  = <|B_phi/RB|>
-    def get_gfileQuantities(self,gfileAtTime, gfilesInTimeWindow):
-        ###First get the quantities that don't need multiple gfiles
-        #We're not going to average them since there is a gfile at our chosen time
-        self.currentSign = np.sign(gfileAtTime['CURRENT'])
+    def get_gfileQuantities(self,gfilesInTimeWindow):
+
+        
 
         fs = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
         epss = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
@@ -571,6 +577,7 @@ class pyLoop:
         avgB2s = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
         avgBphi2s = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
         avgJparas = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
+        avgCXareas = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
         qs = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
         fts = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
         psi_ns = np.zeros((len(gfilesInTimeWindow), len(self.rho_n)))
@@ -580,7 +587,7 @@ class pyLoop:
 
         gfileTimes = np.sort(np.array(list(gfilesInTimeWindow.keys())))
         num_gfiles = len(gfilesInTimeWindow)
-
+        self.currentSign = np.sign(gfilesInTimeWindow[gfileTimes[0]]['CURRENT'])
         for j in range(num_gfiles):
             
             gfile = gfilesInTimeWindow[gfileTimes[j]]
@@ -601,7 +608,7 @@ class pyLoop:
             gfile_rho_n = gfile['RHOVN']
             gfile_psi_n = fluxSurfaces['levels']
             f = gfile['FPOL']
-            avgJpara = gfile.surfAvg('Jpar', interp = 'cubic')*self.currentSign
+            avgJpara = gfile.surfAvg('Jpar', interp = 'cubic')#*self.currentSign
             ft = utils_fusion.f_t(r_minor = avgr, R_major = avgR)
             B_0s[j] = gfile['BCENTR']
 
@@ -615,7 +622,12 @@ class pyLoop:
             qs[j,:] = interp1d(gfile_rho_n, q, kind = 'cubic')(self.rho_n)
             fts[j,:] = interp1d(gfile_rho_n, ft, kind = 'cubic')(self.rho_n)
             psi_ns[j,:] = interp1d(gfile_rho_n, gfile_psi_n, kind = 'cubic')(self.rho_n)
-            psis[j,:] = interp1d(gfile_rho_n, gfile_psi, kind = 'cubic')(self.rho_n)   
+            psis[j,:] = interp1d(gfile_rho_n, gfile_psi, kind = 'cubic')(self.rho_n)  
+            try:
+                avgCXareas[j,:]= interp1d(gfile_rho_n, geo['cxArea'], kind = 'cubic')(self.rho_n)
+            except:
+                print("doesn't have CXarea")
+     
 
         for k in range(len(self.rho_n)):
             self.f[k] = self.getLinearFit(gfileTimes, fs[:,k],self.time)[0]
@@ -631,6 +643,11 @@ class pyLoop:
             self.psi[k] = self.getLinearFit(gfileTimes, psis[:,k],self.time)[0]
             self.dpsi_dt[k] = self.getLinearFit(gfileTimes, psis[:,k],self.time, returnCoefs = True)[2]*1000
             
+            try:
+                self.avgCXarea[k] = self.getLinearFit(gfileTimes, avgCXareas[:,k],self.time)[0]
+            except:
+                pass
+
             """
             if k == 0:
                 #mask = np.where((gfileTimes >= 1340-150)*
@@ -643,6 +660,10 @@ class pyLoop:
                 ax.plot(gfileTimes,coef1[1] + coef1[2]*gfileTimes)
                 #ax.plot(gfileTimes[3:-3], coef2[1] + coef2[2]*gfileTimes[3:-3])
                 #print(f'slop1, slope2: {coef1[2], coef2[2]}')
+                #ax.set_ylim([-.38, -.36])
+                ax.set_ylabel(r'$\psi (0)$')
+                ax.set_xlabel(r'time (ms)')
+                fig.tight_layout()
                 plt.show()
             """
         self.rho_bndry = self.getLinearFit(gfileTimes, rho_bndrys,self.time)[0]
@@ -665,7 +686,8 @@ class pyLoop:
 
 
         if self.useKinetic:
-            dir_list = os.listdir(f'/home/rutherfordg/nvloop/{self.shot}.0{time}_kinetic_efits')
+            targetDir = f'/home/rutherfordg/nvloop/{self.shot}_kinetic_efits'
+            dir_list = os.listdir(targetDir)
             gfilesInTimeWindow = {}
             relevantGfileTimes = []
             for filename in dir_list:
@@ -675,7 +697,7 @@ class pyLoop:
                 gtime = float(filename.split('.')[-1][1:])
                 if self.time - self.dt_avg/2 <= gtime <= self.time + self.dt_avg/2:
                     relevantGfileTimes.append(gtime)
-                    gfilesInTimeWindow[gtime]=omfit_eqdsk_fast.OMFITgeqdsk_fast(f'/home/rutherfordg/nvloop/{self.shot}.0{time}_kinetic_efits/{filename}')
+                    gfilesInTimeWindow[gtime]=omfit_eqdsk_fast.OMFITgeqdsk_fast(f'{targetDir}/{filename}')
             relevantGfileTimes = np.array(relevantGfileTimes)
             relevantGfileTimes.sort()
         elif self.shot in [179173, 179186, 179592, 179587]:
@@ -729,9 +751,7 @@ class pyLoop:
             print('***')
             return
 
-
-        gfileAtTime = gfilesInTimeWindow[float(self.time)]
-        self.get_gfileQuantities(gfileAtTime, gfilesInTimeWindow)
+        self.get_gfileQuantities(gfilesInTimeWindow)
 
         J_BS, sigma_neo = self.getBootstrapAndConductivity(self.time, self.dt_avg)
         self.J_BS = J_BS
@@ -767,6 +787,10 @@ class pyLoop:
         """
             
         self.J_ohm = self.E_para*sigma_neo
+        
+        if np.sign(self.J_ohm[0]) != np.sign(self.avgJpara[0]):
+            self.avgJpara *= -1
+
         self.J_NI = self.avgJpara-self.J_BS-self.J_ohm 
         print(f'{time.time() - startTime} to do nvloop')
         if self.doPlot: 
@@ -857,13 +881,17 @@ class pyLoop:
             
             """
             plt.show() 
-                   
-#loop = pyLoop(179587, 1900.0, dt_avg = 800, efitID = 'EFIT02', useKinetic = False, doPlot = True)
-loop = pyLoop(147634, 4500.0, dt_avg = 1000, efitID = 'EFIT02', useKinetic = False, doPlot = True, outlierTimes = [])
-#loop = pyLoop(179173, 1500, dt_avg = 200, efitID = 'EFIT02er', useKinetic = False, doPlot = True, outlierTimes = [])
-#loop = pyLoop(202158, 1300.0, dt_avg = 200, efitID = 'EFIT02er', doPlot = False, outlierTimes = [1100])
-loop.nvloop()
+ 
+if __name__ == '__main__':                  
+    #loop = pyLoop(179587, 1900.0, dt_avg = 800, efitID = 'EFIT02', useKinetic = False, doPlot = True)
+    #loop = pyLoop(147634, 4500.0, dt_avg = 1000, efitID = 'EFIT02', useKinetic = False, doPlot = True, outlierTimes = [])
+    #loop = pyLoop(200388, 4000.0, dt_avg = 1000, efitID = 'EFIT02er', useKinetic = True, doPlot = True, outlierTimes = [])
+    #loop = pyLoop(179173, 1500, dt_avg = 200, efitID = 'EFIT02er', useKinetic = False, doPlot = True, outlierTimes = [])
+    #loop = pyLoop(202158, 1300.0, dt_avg = 200, efitID = 'EFIT02er', doPlot = False, outlierTimes = [1100])
+    #loop.nvloop()
 
+    #print(f'E: {loop.E_para.tolist()}')
+    print(f'rho: {np.sqrt(loop.psi_n).tolist()}')
 
 
 
