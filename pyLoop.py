@@ -497,21 +497,21 @@ class pyLoop:
         if self.useKinetic:
             self.collectKineticProfs()
 
-        ne, ne_err, _, _ = self.get_ne(t, dt)
-        Te, Te_err, _, _ = self.get_Te(t, dt)
-        nC, nC_err, _, _ = self.get_nC(t, dt)
-        Ti, Ti_err, _, _ = self.get_Ti(t, dt)
-        Zeff, Zeff_err, dZeff_drhon, dZeff_drhon_err = self.get_Zeff(ne, ne_err, nC, nC_err)
+        self.ne, ne_err, _, _ = self.get_ne(t, dt)
+        self.Te, Te_err, _, _ = self.get_Te(t, dt)
+        self.nC, nC_err, _, _ = self.get_nC(t, dt)
+        self.Ti, Ti_err, _, _ = self.get_Ti(t, dt)
+        self.Zeff, Zeff_err, dZeff_drhon, dZeff_drhon_err = self.get_Zeff(self.ne, ne_err, self.nC, nC_err)
 
         #convert temperature to units of eV:
-        Te*=1e3
+        self.Te*=1e3
         Te_err*=1e3
-        Ti*=1e3
+        self.Ti*=1e3
         Ti_err*=1e3
 
-        nD = ne*Zeff-Z_impurity**2*nC
-        nD[nD <= 10] = 10
-        pressure = (ne*Te + nD*Ti + nC*Ti)*1.602e-19
+        self.nD = self.ne*self.Zeff-Z_impurity**2*self.nC
+        self.nD[self.nD <= 10] = 10
+        pressure = (self.ne*self.Te + self.nD*self.Ti + self.nC*self.Ti)*1.602e-19
         """
         fig,ax = plt.subplots()
         ax.plot(self.rho_n, Te)
@@ -529,21 +529,21 @@ class pyLoop:
                 fT = np.array([self.ft]), eps = np.array([self.eps]),
                 psiraw = np.array([self.psi]), R = np.array([self.avgR]),
                 I_psi = np.array([self.f]),
-                Ti = np.array([Ti]), ne = np.array([ne]), Te = np.array([Te]),
+                Ti = np.array([self.Ti]), ne = np.array([self.ne]), Te = np.array([self.Te]),
                 charge_number_to_use_in_ion_collisionality = 'Zavg', 
                 charge_number_to_use_in_ion_lnLambda = 'Zavg',
-                Zis=[1,6], nis = np.array([[nD], [nC]]),
+                Zis=[1,6], nis = np.array([[self.nD], [self.nC]]),
                 R0 = 1.6955, p = np.array([pressure]), version = 'osborne')[0]
 
-        sigma_neo = utils_fusion.nclass_conductivity(Zeff = np.array([Zeff]), 
-                psi_N = self.psi_n, Ti = np.array([Ti]),
-                ne = np.array([ne]), Te = np.array([Te]), 
+        sigma_neo = utils_fusion.nclass_conductivity(Zeff = np.array([self.Zeff]), 
+                psi_N = self.psi_n, Ti = np.array([self.Ti]),
+                ne = np.array([self.ne]), Te = np.array([self.Te]), 
                 q = self.q, eps = self.eps,
                 fT = self.ft, R = self.avgR,
                 Zdom = 1,
-                charge_number_to_use_in_ion_collisionality = 'Zavg',
-                charge_number_to_use_in_ion_lnLambda = 'Zavg', 
-                Zis=[1,6], nis = np.array([[nD], [nC]]))[0]
+                charge_number_to_use_in_ion_collisionality = 'Koh',
+                charge_number_to_use_in_ion_lnLambda = 'Koh', 
+                Zis=[1,6], nis = np.array([[self.nD], [self.nC]]))[0]
         
 
         return J_BS_prof_1, sigma_neo
@@ -588,6 +588,7 @@ class pyLoop:
         gfileTimes = np.sort(np.array(list(gfilesInTimeWindow.keys())))
         num_gfiles = len(gfilesInTimeWindow)
         self.currentSign = np.sign(gfilesInTimeWindow[gfileTimes[0]]['CURRENT'])
+        #fig, ax= plt.subplots()
         for j in range(num_gfiles):
             
             gfile = gfilesInTimeWindow[gfileTimes[j]]
@@ -623,6 +624,7 @@ class pyLoop:
             fts[j,:] = interp1d(gfile_rho_n, ft, kind = 'cubic')(self.rho_n)
             psi_ns[j,:] = interp1d(gfile_rho_n, gfile_psi_n, kind = 'cubic')(self.rho_n)
             psis[j,:] = interp1d(gfile_rho_n, gfile_psi, kind = 'cubic')(self.rho_n)  
+            #ax.scatter([gfileTimes[j]], [gfile_psi[0]])
             try:
                 avgCXareas[j,:]= interp1d(gfile_rho_n, geo['cxArea'], kind = 'cubic')(self.rho_n)
             except:
@@ -648,13 +650,15 @@ class pyLoop:
             except:
                 pass
 
-            """
-            if k == 0:
+            #"""
+            if k in [0,10,20, 30, 40]:
                 #mask = np.where((gfileTimes >= 1340-150)*
                 #            (gfileTimes <= 1340+150))
 
                 fig,ax = plt.subplots()
                 ax.scatter(gfileTimes, psis[:,k])
+                #ax.set_ylim([.4215-.005, .4215+.005])
+                
                 coef1 = self.getLinearFit(gfileTimes, psis[:,k],self.time, returnCoefs = True)
                 #coef2 = self.getLinearFit(gfileTimes[mask], psis[mask,k],self.time, returnCoefs = True)
                 ax.plot(gfileTimes,coef1[1] + coef1[2]*gfileTimes)
@@ -664,8 +668,8 @@ class pyLoop:
                 ax.set_ylabel(r'$\psi (0)$')
                 ax.set_xlabel(r'time (ms)')
                 fig.tight_layout()
-                plt.show()
-            """
+
+            #"""
         self.rho_bndry = self.getLinearFit(gfileTimes, rho_bndrys,self.time)[0]
         self.B_0 = self.getLinearFit(gfileTimes, B_0s,self.time)[0]
             
@@ -737,13 +741,7 @@ class pyLoop:
         gfileTimes = gfilesInTimeWindow.keys()
         for outlierTime in self.outlierTimes:
             gfilesInTimeWindow.pop(outlierTime,None)
-        """
-        if self.time not in relevantGfileTimes:
-            print('***')
-            print('Requested gfile time is not in tree, skipping it')
-            print('***')
-            return
-        """
+
         print(f'num gfiles in window: {len(relevantGfileTimes)}')
         if len(relevantGfileTimes) < 3:
             print('***')
@@ -753,7 +751,7 @@ class pyLoop:
 
         self.get_gfileQuantities(gfilesInTimeWindow)
 
-        J_BS, sigma_neo = self.getBootstrapAndConductivity(self.time, self.dt_avg)
+        J_BS, self.sigma_neo = self.getBootstrapAndConductivity(self.time, self.dt_avg)
         self.J_BS = J_BS
         
         vv1 = 2*np.pi*self.rho_n**2*(self.B_0/self.q[:])*self.rho_bndry*self.drho_bndry_dt
@@ -763,30 +761,8 @@ class pyLoop:
         #"""
         self.E_para = ((self.voltage-vv2)*
                     self.avgBphi2/(2*np.pi*self.B_0*self.f))
-        """
-        fig,ax = plt.subplots()
-        ax.plot(self.rho_n, self.voltage, lw = 2, label = 'with correction')
-        ax.plot(self.rho_n, 2*np.pi*self.dpsi_dt, lw = 2, label = 'no correction')
-        ax.set_xlabel(f'rho_n')
-        ax.set_ylabel(f'Voltage')
-        ax.legend()
-        ax.set_box_aspect(1)
-        fig.tight_layout()
-        plt.show()
-
-        fig,ax = plt.subplots()
-        ax.plot(self.rho_n, self.E_para, lw = 2, label = 'with correction')
-        ax.plot(self.rho_n, ((self.voltage)*self.avgBphi2/(2*np.pi*self.B_0*self.f)), lw = 2, label = 'no E correction')
-        ax.plot(self.rho_n, ((2*np.pi*self.dpsi_dt)*self.avgBphi2/(2*np.pi*self.B_0*self.f)), lw = 2, label = 'no E or V correction')
-        ax.set_xlabel(f'rho_n')
-        ax.set_ylabel(f'E||')
-        ax.legend()
-        ax.set_box_aspect(1)
-        fig.tight_layout()
-        plt.show()
-        """
-            
-        self.J_ohm = self.E_para*sigma_neo
+                  
+        self.J_ohm = self.E_para*self.sigma_neo
         
         if np.sign(self.J_ohm[0]) != np.sign(self.avgJpara[0]):
             self.avgJpara *= -1
@@ -825,10 +801,10 @@ class pyLoop:
             #axes[1,1].set_ylim([-.015,.01])
 
             fig.suptitle(f'Shot {self.shot}, {self.time} ms')
-            axes[1,2].plot(self.rho_n, self.psi,lw = 2)
-            axes[1,2].set_title(r'$\psi$')
+            axes[1,2].plot(self.rho_n, 1/self.sigma_neo,lw = 2)
+            axes[1,2].set_title(r'$\eta_{neo}$')
             axes[1,2].set_xlabel(r'$\hat{\rho}$')
-
+            axes[1,2].set_yscale('log')
             fig.tight_layout()
             #"""
             #"""
@@ -880,18 +856,21 @@ class pyLoop:
             figVER.tight_layout()
             
             """
-            plt.show() 
+            #plt.show() 
  
 if __name__ == '__main__':                  
     #loop = pyLoop(179587, 1900.0, dt_avg = 800, efitID = 'EFIT02', useKinetic = False, doPlot = True)
     #loop = pyLoop(147634, 4500.0, dt_avg = 1000, efitID = 'EFIT02', useKinetic = False, doPlot = True, outlierTimes = [])
     #loop = pyLoop(200388, 4000.0, dt_avg = 1000, efitID = 'EFIT02er', useKinetic = True, doPlot = True, outlierTimes = [])
     #loop = pyLoop(179173, 1500, dt_avg = 200, efitID = 'EFIT02er', useKinetic = False, doPlot = True, outlierTimes = [])
-    #loop = pyLoop(202158, 1300.0, dt_avg = 200, efitID = 'EFIT02er', doPlot = False, outlierTimes = [1100])
-    #loop.nvloop()
-
+    start = 2000
+    end = 2100
+    dt = end - start
+    avg = (start + end)/2    
+    loop = pyLoop(204537, avg, dt_avg = dt, efitID = 'EFIT02er', doPlot = True)
+    loop.nvloop()
+    plt.show()
     #print(f'E: {loop.E_para.tolist()}')
-    print(f'rho: {np.sqrt(loop.psi_n).tolist()}')
 
 
 

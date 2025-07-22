@@ -7,6 +7,72 @@ plt.rc('axes', labelsize = 16)
 plt.rc('axes', titlesize = 16)
 plt.rc('legend', fontsize = 14)
 
+
+
+def LHcompare():
+    startTime = 1850#1900
+    endTime = 2300#2200
+
+    #compareManyShots([204535,204537],[204536,204538],startTime, endTime)    
+    #compareTwoShots(204538, 204537, startTime, endTime)
+    compareTwoShots(203913, 203915, startTime, endTime)
+
+
+
+    
+def compareManyShots(CD_shots, ref_shots, startTime, endTime):
+    dt = endTime - startTime
+    time = startTime + dt/2
+
+    deltaNI = None
+    deltaBS = None
+    deltaOhm = None
+
+    for CD_shot in CD_shots:
+        loop_CD = pyLoop.pyLoop(CD_shot, time, dt_avg = dt,
+        efitID = 'EFIT02er',doPlot = False)
+        loop_CD.nvloop()
+        
+        if deltaNI is None:
+            deltaNI = loop_CD.J_NI/len(CD_shots)
+        else:
+            deltaNI += loop_CD.J_NI/len(CD_shots)
+        if deltaBS is None:
+            deltaBS = loop_CD.J_BS/len(CD_shots)
+        else:
+            deltaBS += loop_CD.J_BS/len(CD_shots)
+        if deltaOhm is None:
+            deltaOhm = loop_CD.J_ohm/len(CD_shots)
+        else:
+            deltaOhm += loop_CD.J_ohm/len(CD_shots)
+    
+    for ref_shot in ref_shots:
+        loop_ref = pyLoop.pyLoop(ref_shot, time, dt_avg = dt,
+        efitID = 'EFIT02er',doPlot = False)
+        loop_ref.nvloop()
+        
+        deltaNI -= loop_ref.J_NI/len(ref_shots)
+        deltaBS -= loop_ref.J_BS/len(ref_shots)
+        deltaOhm -= loop_ref.J_ohm/len(ref_shots)
+
+    fig,ax = plt.subplots()
+
+    ax.plot(loop_ref.rho_n, (deltaNI/1e6), label = r'$\Delta$ $J_{NI}$', lw = 2)
+    ax.plot(loop_ref.rho_n, (deltaBS/1e6), label = r'$\Delta$ $J_{BS}$', lw = 2)
+    ax.plot(loop_ref.rho_n, (deltaOhm/1e6), label = r'$\Delta$ $J_{ohm}$', lw = 2)
+    
+
+    #ax.set_ylabel(rf'$J_{{{CDShot}, {{X}}}} - J_{{{refShot}, {{X}}}}$ (MA/m^2)')
+    #axes[0].set_ylim([-100,100])
+    ax.legend(ncol = 1)
+    ax.set_xlabel(r'$\rho_n$')
+
+    fig.tight_layout()
+    plt.show()
+
+
+
+
 def compareMDSefits():
     start = 3900
     stop = 5700
@@ -107,10 +173,10 @@ def compareTwoShots(refShot, CDShot, startTime, endTime):
     time = startTime + dt/2
 
     loop_ref = pyLoop.pyLoop(refShot, time, dt_avg = dt,
-        efitID = 'EFIT02',doPlot = False)
+        efitID = 'EFIT02er',doPlot = True)
 
     loop_CD = pyLoop.pyLoop(CDShot, time, dt_avg = dt,
-        efitID = 'EFIT02',doPlot = False)
+        efitID = 'EFIT02er',doPlot = True)
 
     loop_ref.nvloop()
     loop_CD.nvloop()
@@ -121,10 +187,13 @@ def compareTwoShots(refShot, CDShot, startTime, endTime):
     deltaBS = (loop_CD.J_BS - loop_ref.J_BS) 
     deltaOhm = (loop_CD.J_ohm - loop_ref.J_ohm)
 
-    axes[0].plot(loop_ref.rho_n, deltaNI/1e6, label = r'$\Delta$ $J_{NI}$', lw = 2)
-    axes[0].plot(loop_ref.rho_n, deltaBS/1e6, label = r'$\Delta$ $J_{BS}$', lw = 2)
-    axes[0].plot(loop_ref.rho_n, deltaOhm/1e6, label = r'$\Delta$ $J_{ohm}$', lw = 2)
+    axes[0].plot(loop_ref.rho_n, (deltaNI/1e6), label = r'$\Delta$ $J_{NI}$', lw = 2)
+    axes[0].plot(loop_ref.rho_n, (deltaBS/1e6), label = r'$\Delta$ $J_{BS}$', lw = 2)
+    axes[0].plot(loop_ref.rho_n, (deltaOhm/1e6), label = r'$\Delta$ $J_{ohm}$', lw = 2)
     
+    #axes[0].plot(loop_ref.rho_n, loop_CD.E_para, label = r'$\Delta$ $J_{BS}$', lw = 2)
+    #axes[0].plot(loop_ref.rho_n, loop_ref.E_para, label = r'$\Delta$ $J_{BS}$', lw = 2)
+
     rho_n_midpoints = (loop_ref.rho_n[:-1] + loop_ref.rho_n[1:])/2
     dArea = loop_ref.avgCXarea[1:] - loop_ref.avgCXarea[:-1]
     dDeltaNI = (deltaNI[1:] + deltaNI[:-1])/2
@@ -147,6 +216,9 @@ def compareTwoShots(refShot, CDShot, startTime, endTime):
     axes[1].legend(ncol = 1)
     axes[1].set_xlabel(r'$\rho_n$')
 
+    #axes[0].set_ylim([0,.5])
+    axes[1].set_ylim([-100,100])
+
     fig.tight_layout()
     plt.show()
 
@@ -155,9 +227,9 @@ def compareShotsHelicon():
     startTime = 1110
     endTime = 1510
 
-    compareTwoShots(202156, 202159, startTime, endTime)
+    compareTwoShots(202145, 202142, startTime, endTime)
 
-compareShotsHelicon()
+LHcompare()
 
 
 
